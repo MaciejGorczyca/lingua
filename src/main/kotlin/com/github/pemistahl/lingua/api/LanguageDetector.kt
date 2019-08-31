@@ -129,6 +129,66 @@ class LanguageDetector internal constructor(
         return getMostLikelyLanguage(allProbabilities, unigramCountsOfInputText, languagesSequence)
     }
 
+    fun detectAllProbabilities(text: String): Map<Language, Double> {
+        val trimmedText = text
+            .trim()
+            .toLowerCase()
+            .replace(PUNCTUATION, "")
+            .replace(NUMBERS, "")
+            .replace(MULTIPLE_WHITESPACE, " ")
+
+        if (trimmedText.isEmpty() || NO_LETTER.matches(trimmedText)) return hashMapOf()
+
+        val words = if (trimmedText.contains(' ')) trimmedText.split(" ") else listOf(trimmedText)
+
+        val languageDetectedByRules = detectLanguageWithRules(words)
+
+        val languagesSequence = filterLanguagesByRules(words)
+
+        // dirty hack for returning values for cn, kr, jp etc
+        if (languageDetectedByRules != UNKNOWN) {
+            val summedUpProbabilities = hashMapOf<Language, Double>()
+            for (language in languagesSequence) {
+                summedUpProbabilities[language] = 0.0
+            }
+            summedUpProbabilities[languageDetectedByRules] = 100.0
+            return summedUpProbabilities
+        }
+
+        val textSequence = trimmedText.lineSequence()
+        val allProbabilities = mutableListOf<Map<Language, Double>>()
+        val unigramCountsOfInputText = mutableMapOf<Language, Int>()
+
+        if (trimmedText.length >= 1) {
+            val unigramLanguageModel = LanguageModel.fromTestData(textSequence, Unigram::class)
+            addNgramProbabilities(allProbabilities, languagesSequence, unigramLanguageModel)
+            countUnigramsOfInputText(unigramCountsOfInputText, unigramLanguageModel, languagesSequence)
+        }
+        if (trimmedText.length >= 2) {
+            addNgramProbabilities(allProbabilities, languagesSequence, LanguageModel.fromTestData(textSequence, Bigram::class))
+        }
+        if (trimmedText.length >= 3) {
+            addNgramProbabilities(allProbabilities, languagesSequence, LanguageModel.fromTestData(textSequence, Trigram::class))
+        }
+        if (trimmedText.length >= 4) {
+            addNgramProbabilities(allProbabilities, languagesSequence, LanguageModel.fromTestData(textSequence, Quadrigram::class))
+        }
+        if (trimmedText.length >= 5) {
+            addNgramProbabilities(allProbabilities, languagesSequence, LanguageModel.fromTestData(textSequence, Fivegram::class))
+        }
+
+        val summedUpProbabilities = hashMapOf<Language, Double>()
+        for (language in languagesSequence) {
+            summedUpProbabilities[language] = allProbabilities.sumByDouble { it[language] ?: 0.0 }
+
+            if (unigramCountsOfInputText.containsKey(language)) {
+                summedUpProbabilities[language] = summedUpProbabilities.getValue(language) / unigramCountsOfInputText.getValue(language)
+            }
+        }
+
+        return summedUpProbabilities
+    }
+
     internal fun addLanguageModel(language: Language) {
         languages.add(language)
         if (!unigramLanguageModels.containsKey(language)) {
